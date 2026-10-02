@@ -1,0 +1,91 @@
+# Tests for the humanize package - offline, deterministic (no ai/fs/net).
+#
+# This package replaces the native `std.humanize` module, so its contract is
+# "answer exactly what the native one answers". Every expected value below was
+# produced by `std.humanize` itself (Ecko 0.58) and frozen here, and a wider
+# run of 6,052 inputs against the native module matched on every one - see
+# the README's Testing section.
+import std.test
+import "../main.ecko"
+h = main
+
+test.case("duration takes milliseconds and shows the two largest units", fn() {
+    test.eq(h.duration(0), "0s")
+    test.eq(h.duration(1), "1ms")
+    test.eq(h.duration(250), "250ms")
+    test.eq(h.duration(999), "999ms")
+    test.eq(h.duration(1000), "1s")
+    test.eq(h.duration(45000), "45s")
+    test.eq(h.duration(90000), "1m 30s")
+    test.eq(h.duration(3600000), "1h")
+    test.eq(h.duration(7505000), "2h 5m")
+    test.eq(h.duration(90061000), "1d 1h")
+    test.eq(h.duration(-90000), "1m 30s")
+    test.eq(h.duration(1.5), "1ms")
+})
+
+test.case("size is 1024-based with one decimal, ties to even", fn() {
+    test.eq(h.size(0), "0 B")
+    test.eq(h.size(512), "512 B")
+    test.eq(h.size(1023), "1023 B")
+    test.eq(h.size(1024), "1 KB")
+    test.eq(h.size(1536), "1.5 KB")
+    test.eq(h.size(535808), "523.2 KB")
+    test.eq(h.size(1468006), "1.4 MB")
+    test.eq(h.size(1073741824), "1 GB")
+    test.eq(h.size(1099511627776), "1 TB")
+    test.eq(h.size(-1023), "1023 B")
+})
+
+test.case("ordinal handles the 11-13 trap and negatives as the native module did", fn() {
+    test.eq(h.ordinal(0), "0th")
+    test.eq(h.ordinal(1), "1st")
+    test.eq(h.ordinal(2), "2nd")
+    test.eq(h.ordinal(3), "3rd")
+    test.eq(h.ordinal(4), "4th")
+    test.eq(h.ordinal(11), "11th")
+    test.eq(h.ordinal(12), "12th")
+    test.eq(h.ordinal(13), "13th")
+    test.eq(h.ordinal(21), "21st")
+    test.eq(h.ordinal(22), "22nd")
+    test.eq(h.ordinal(23), "23rd")
+    test.eq(h.ordinal(101), "101st")
+    test.eq(h.ordinal(111), "111th")
+    test.eq(h.ordinal(112), "112th")
+    test.eq(h.ordinal(113), "113th")
+    test.eq(h.ordinal(-1), "-1th")
+    test.eq(h.ordinal(-11), "-11th")
+    test.eq(h.ordinal(21.9), "21st")
+})
+
+test.case("plural adds s unless given the plural, and keeps the singular for 1 and -1", fn() {
+    test.eq(h.plural(1, "day"), "1 day")
+    test.eq(h.plural(0, "day"), "0 days")
+    test.eq(h.plural(2, "day"), "2 days")
+    test.eq(h.plural(-1, "day"), "-1 day")
+    test.eq(h.plural(2, "person", "people"), "2 people")
+    test.eq(h.plural(1, "person", "people"), "1 person")
+})
+
+test.case("relative reads past and future, just-now within five seconds, and saturates", fn() {
+    test.eq(h.relative(0, 0), "just now")
+    test.eq(h.relative(0, 4999), "just now")
+    test.eq(h.relative(0, 5000), "5 seconds ago")
+    test.eq(h.relative(0, 60000), "1 minute ago")
+    test.eq(h.relative(0, 7200000), "2 hours ago")
+    test.eq(h.relative(0, 259200000), "3 days ago")
+    test.eq(h.relative(0, 3888000000), "1 month ago")
+    test.eq(h.relative(0, 63072000000), "2 years ago")
+    test.eq(h.relative(7200000, 0), "in 2 hours")
+    test.eq(h.relative(-9223372036854775807 - 1, 9223372036854775807), "292471208 years ago")
+})
+
+test.case("a non-number is refused, naming the function", fn() {
+    r = try { h.duration("soon") } catch (e) { e.message }
+    test.ok(contains(r, "humanize.duration needs a number of milliseconds"), r)
+})
+
+test.case("the refusal is shaped like the native module's", fn() {
+    e = try { h.size([]) } catch (err) { err }
+    test.eq(e.kind, "bug")
+})
