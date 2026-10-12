@@ -49,9 +49,9 @@ the function.
   `import humanize` after `ecko get`. The answers are the same - the package
   was checked against the native module on 6,052 inputs to every function,
   including the extremes of the Int range, with no difference.
-- Durations are **milliseconds**, as `std.humanize.duration` takes from Ecko
-  0.58. On an older Ecko the native function took seconds; this package does
-  not.
+- Durations are **milliseconds**, as `std.humanize.duration` took from Ecko
+  0.58 until the module was removed in 0.61. Before 0.58 the native function
+  took seconds; this package does not.
 - `plural` only adds `s`. For English pluralisation rules and irregulars, use
   the [inflect](https://github.com/ecko-lang/inflect) package's `pluralize`.
 
