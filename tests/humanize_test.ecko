@@ -1,10 +1,11 @@
 # Tests for the humanize package - offline, deterministic (no ai/fs/net).
 #
-# This package replaces the native `std.humanize` module, so its contract is
-# "answer exactly what the native one answers". Every expected value below was
-# produced by `std.humanize` itself (Ecko 0.58) and frozen here, and a wider
-# run of 6,052 inputs against the native module matched on every one - see
-# the README's Testing section.
+# This package replaced the native `std.humanize` module, and most expected
+# values below were produced by `std.humanize` itself (Ecko 0.58) and frozen.
+# The exceptions are the native module's own bugs, fixed here on purpose: the
+# negative ordinals, a size that rounds up into the next unit, the sign of a
+# negative size, and plurals of words ending in s, x, z, ch, sh or a
+# consonant and y.
 import std.test
 import "../main.ecko"
 h = main
@@ -34,10 +35,10 @@ test.case("size is 1024-based with one decimal, ties to even", fn() {
     test.eq(h.size(1468006), "1.4 MB")
     test.eq(h.size(1073741824), "1 GB")
     test.eq(h.size(1099511627776), "1 TB")
-    test.eq(h.size(-1023), "1023 B")
+    test.eq(h.size(-1023), "-1023 B")
 })
 
-test.case("ordinal handles the 11-13 trap and negatives as the native module did", fn() {
+test.case("ordinal handles the 11-13 trap and negatives by their magnitude", fn() {
     test.eq(h.ordinal(0), "0th")
     test.eq(h.ordinal(1), "1st")
     test.eq(h.ordinal(2), "2nd")
@@ -53,9 +54,12 @@ test.case("ordinal handles the 11-13 trap and negatives as the native module did
     test.eq(h.ordinal(111), "111th")
     test.eq(h.ordinal(112), "112th")
     test.eq(h.ordinal(113), "113th")
-    test.eq(h.ordinal(-1), "-1th")
+    test.eq(h.ordinal(-1), "-1st")
+    test.eq(h.ordinal(-2), "-2nd")
     test.eq(h.ordinal(-11), "-11th")
-    test.eq(h.ordinal(21.9), "21st")
+    test.eq(h.ordinal(-21), "-21st")
+    test.eq(h.ordinal(21.0), "21st")
+    test.eq(h.ordinal(-9223372036854775807 - 1), "-9223372036854775808th")
 })
 
 test.case("plural adds s unless given the plural, and keeps the singular for 1 and -1", fn() {
@@ -82,10 +86,55 @@ test.case("relative reads past and future, just-now within five seconds, and sat
 
 test.case("a non-number is refused, naming the function", fn() {
     r = try { h.duration("soon") } catch (e) { e.message }
-    test.ok(contains(r, "humanize.duration needs a number of milliseconds"), r)
+    test.ok(contains(r, "humanize.duration: ms must be a number"), r)
 })
 
 test.case("the refusal is shaped like the native module's", fn() {
     e = try { h.size([]) } catch (err) { err }
     test.eq(e.kind, "bug")
+    test.eq(e.reason, "bad_argument")
+})
+
+test.case("size moves to the next unit when rounding reaches 1024", fn() {
+    test.eq(h.size(1048575), "1 MB")
+    test.eq(h.size(1073741823), "1 GB")
+    test.eq(h.size(1048524), "1023.9 KB")
+})
+
+test.case("size keeps the sign of a negative count", fn() {
+    test.eq(h.size(-2048), "-2 KB")
+    test.eq(h.size(-1468006), "-1.4 MB")
+})
+
+test.case("ordinal refuses a fractional number or a non-number", fn() {
+    for bad in [21.9, "3", null, 1e30] {
+        e = try { h.ordinal(bad) } catch (err) { err }
+        test.eq(e.kind, "bug")
+        test.eq(e.reason, "bad_argument")
+        test.ok(contains(e.message, "humanize.ordinal"), e.message)
+    }
+})
+
+test.case("plural adds es after s, x, z, ch and sh, and ies after a consonant and y", fn() {
+    test.eq(h.plural(2, "bus"), "2 buses")
+    test.eq(h.plural(2, "box"), "2 boxes")
+    test.eq(h.plural(2, "match"), "2 matches")
+    test.eq(h.plural(2, "dish"), "2 dishes")
+    test.eq(h.plural(2, "city"), "2 cities")
+    test.eq(h.plural(2, "day"), "2 days")
+    test.eq(h.plural(1, "bus"), "1 bus")
+})
+
+test.case("plural refuses words that are not strings", fn() {
+    for call in [fn() h.plural(2, null), fn() h.plural(2, "a", 5)] {
+        e = try { call() } catch (err) { err }
+        test.eq(e.kind, "bug")
+        test.eq(e.reason, "bad_argument")
+    }
+})
+
+test.case("a Float that is not finite is refused, not crashed on", fn() {
+    e = try { h.duration(1e300 * 1e300) } catch (err) { err }
+    test.eq(e.kind, "bug")
+    test.eq(e.reason, "bad_argument")
 })

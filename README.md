@@ -1,11 +1,8 @@
-# humanize - Ecko Std Lib Package
+# humanize
 
-Durations, byte sizes, relative times, ordinals and counted words, rendered
-for people to read - in CLI output, digests and logs.
-
-Pure computation - no capabilities. This is the `std.humanize` module from the
-Ecko standard library, moved into a package: every function answers exactly
-what the native one did, so switching is the install line and nothing else.
+Durations, byte sizes, relative times, ordinals and counted words, rendered for
+people to read in CLI output, digests and logs. Pure computation - no
+capabilities.
 
 ## Install
 
@@ -20,40 +17,66 @@ import humanize
 ## Usage
 
 ```ecko
-humanize.duration(7505000)                  # "2h 5m"   (milliseconds)
-humanize.duration(250)                      # "250ms"
-humanize.size(1468006)                      # "1.4 MB"
-humanize.relative(event, time.now())        # "3 days ago" / "in 5 minutes" / "just now"
-humanize.ordinal(23)                        # "23rd"
-humanize.plural(3, "file")                  # "3 files"
-humanize.plural(2, "person", "people")      # "2 people"
+import humanize
+
+print(humanize.duration(7505000))  # 2h 5m
+print(humanize.duration(250))  # 250ms
+print(humanize.size(1468006))  # 1.4 MB
+print(humanize.ordinal(23))  # 23rd
+print(humanize.plural(3, "box"))  # 3 boxes
+print(humanize.plural(2, "person", "people"))  # 2 people
+
+# `relative` takes "now" as an argument; pass time.now() in a real program.
+now = 1700000000000
+print(humanize.relative(now - 3 * 86400000, now))  # 3 days ago
+print(humanize.relative(now + 2 * 3600000, now))  # in 2 hours
 ```
 
 ## API
 
-| function | result |
+| function | returns |
 |---|---|
-| `duration(ms)` | The two largest non-zero units, e.g. `"2h 5m"`; under a second, `"250ms"`; zero is `"0s"`. A negative duration renders as its magnitude. |
-| `size(bytes)` | 1024-based, one decimal with a trailing `.0` dropped: `"512 B"`, `"1 KB"`, `"1.4 MB"`, up to PB. A tie rounds to even (`535808` is `"523.2 KB"`). |
-| `relative(event, now)` | Two unix-millisecond timestamps. A later `now` is the past (`"3 days ago"`), an earlier one the future (`"in 2 hours"`); within five seconds is `"just now"`. Months are 30 days, years 365. |
-| `ordinal(n)` | `"1st"`, `"2nd"`, `"11th"`, `"23rd"`. |
-| `plural(n, singular, plural?)` | `"3 days"`: the word gets an `s` for anything but 1 or -1, unless you pass the plural. |
-
-A Float argument is truncated toward zero first, as the native module did. A
-value that is not a number is refused with `{ kind: "bug", message }` naming
-the function.
+| `duration(ms)` | the two largest non-zero units, `"2h 5m"`; under a second `"250ms"`; zero `"0s"` |
+| `size(bytes)` | a 1024-based size with one decimal, `"512 B"`, `"1 KB"`, `"1.4 MB"`, up to PB |
+| `relative(event, now)` | `"3 days ago"`, `"in 2 hours"` or `"just now"`, between two unix-millisecond timestamps |
+| `ordinal(n)` | the ordinal of a whole number, `"23rd"`, `"-11th"` |
+| `plural(n, singular, plural = null)` | the count and the word, plural for anything but 1 and -1, `"3 days"` |
 
 ## Notes
 
-- **Moving from `std.humanize`:** replace `import std.humanize` with
-  `import humanize` after `ecko get`. The answers are the same - the package
-  was checked against the native module on 6,052 inputs to every function,
-  including the extremes of the Int range, with no difference.
-- Durations are **milliseconds**, as `std.humanize.duration` took from Ecko
-  0.58 until the module was removed in 0.61. Before 0.58 the native function
-  took seconds; this package does not.
-- `plural` only adds `s`. For English pluralisation rules and irregulars, use
-  the [inflect](https://github.com/ecko-lang/inflect) package's `pluralize`.
+### Errors
+
+| kind | reason | when |
+|---|---|---|
+| `bug` | `bad_argument` | a number argument is not a number (or is an infinite Float), `ordinal` got a fractional number, or a word is not a string |
+
+### Numbers
+
+Durations are milliseconds. A negative duration renders as its magnitude; a
+negative size keeps its sign (`"-2 KB"`). A Float is truncated toward zero
+first, except in `ordinal`, which accepts only a whole number and gives the
+same answer as the `inflect` package (`-1st`).
+
+Sizes use 1024-based units labelled KB, MB, GB, TB and PB. A tie rounds to even
+(`535808` is `"523.2 KB"`), and a value that rounds up to 1024 moves to the
+next unit (`1048575` is `"1 MB"`).
+
+`relative` counts months as 30 days and years as 365.
+
+### Plurals
+
+`plural` follows the regular English endings: `-es` after s, x, z, ch and sh,
+`-ies` after a consonant and y, `-s` otherwise. Pass the plural for anything
+irregular, or use the [inflect](https://github.com/ecko-lang/inflect) package,
+which knows irregular words.
+
+### Moving from `std.humanize`
+
+Replace `import std.humanize` with `import humanize` after `ecko get`. The
+answers are the native module's, except where it was wrong: negative ordinals
+(`-1th` is now `-1st`), a size rounding into the next unit (`1024 KB` is now
+`1 MB`), the sign of a negative size, the regular plural endings, and
+`ordinal` of a fractional number, which is now refused.
 
 ## Testing
 
@@ -61,9 +84,6 @@ the function.
 ecko test
 ```
 
-Offline and deterministic. Every expected value in `tests/humanize_test.ecko`
-was produced by the native `std.humanize` and frozen.
-
 ## License
 
-MIT
+[MIT](LICENSE)

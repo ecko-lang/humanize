@@ -1,10 +1,11 @@
 {
   "module": "github.com/ecko-lang/humanize",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "entrypoint": "main.ecko",
-  "description": "Durations, byte sizes, relative times, ordinals and counted words for people to read. Pure - no capabilities. The std.humanize module, as a package.",
+  "description": "Durations, byte sizes, relative times, ordinals and counted words for people to read. Pure - no capabilities.",
   "author": "Sean Nieuwoudt <sean@underwulf.com>",
   "license": "MIT",
   "capabilities": [],
-  "dependencies": {}
+  "dependencies": {},
+  "ecko": "0.81.0"
 }

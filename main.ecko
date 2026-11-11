@@ -1,8 +1,9 @@
 # humanize - numbers and times rendered for people.
 #
-# The `std.humanize` native module, rewritten in Ecko so it can leave the
-# standard library (board card 66d8a29d): every function answers exactly what
-# the native one does, which tests/humanize_test.ecko holds it to. Pure and
+# The `std.humanize` native module, rewritten in Ecko so it could leave the
+# standard library. It answers what the native one did, except where the
+# native one was wrong (negative ordinals, a size rounding into the next unit,
+# the sign of a negative size, plurals of -s/-x/-z/-ch/-sh/-y words). Pure and
 # deterministic - `relative` takes "now" as an argument rather than reading the
 # clock - so its output is safe to assert on.
 
@@ -13,22 +14,49 @@ fn magnitude(n) {
     if n >= 0 { n } else if n == -9223372036854775807 - 1 { 9223372036854775807 } else { 0 - n }
 }
 
-# A whole number from an Int or a Float (truncated toward zero), as the
-# native module took them.
-fn whole(x, who, what) {
-    match type_of(x) {
-        "int" => x
-        "float" => int(x)
-        _ => error({ kind: "bug", message: "humanize.{who} needs a number of {what}" })
+# A value for an error message: a string quoted, anything else with its type.
+fn describe(v) {
+    match type_of(v) {
+        "string" => "\"{v}\""
+        "null" => "null"
+        t => "{t} {v}"
     }
 }
 
-## The two largest non-zero units of a duration in milliseconds.
-## `duration(7505000)` is `"2h 5m"`, `duration(3600000)` is `"1h"`, and anything
-## under a second is milliseconds: `duration(250)` is `"250ms"`. A negative
-## duration renders as its magnitude.
+# Raise a programmer-mistake error naming the function and the argument.
+fn bad_argument(who, arg, want, got) {
+    error(
+        {
+            kind: "bug",
+            reason: "bad_argument",
+            message: "humanize.{who}: {arg} must be {want}, got {describe(got)}",
+        },
+    )
+}
+
+# A whole number from an Int or a finite Float (truncated toward zero), as the
+# native module took them.
+fn whole(x, who, arg) {
+    match type_of(x) {
+        "int" => x
+        "float" => try { int(x) } catch (_) { bad_argument(who, arg, "a finite number", x) }
+        _ => bad_argument(who, arg, "a number", x)
+    }
+}
+
+## The two largest non-zero units of a duration given in milliseconds.
+##
+## Units are d, h, m and s; anything under a second is milliseconds, and zero
+## is `"0s"`. A negative duration renders as its magnitude, and a Float is
+## truncated first.
+##
+## errors: `bug`/`bad_argument` when `ms` is not a finite number.
+##
+## example:
+##   humanize.duration(7505000)   # "2h 5m"
+##   humanize.duration(250)       # "250ms"
 export fn duration(ms) {
-    n = magnitude(whole(ms, "duration", "milliseconds"))
+    n = magnitude(whole(ms, "duration", "ms"))
     if n == 0 { return "0s" }
     if n < 1000 { return "{n}ms" }
     total = n // 1000
@@ -54,12 +82,22 @@ fn tenths_even(x) {
     if rest > 0.5 { lo + 1 } else if rest < 0.5 { lo } else if lo % 2 == 0 { lo } else { lo + 1 }
 }
 
-## A byte count in 1024-based units with one decimal, trailing `.0` dropped:
-## `size(1468006)` is `"1.4 MB"`, `size(1024)` is `"1 KB"`, `size(512)` is
-## `"512 B"`. Units run B, KB, MB, GB, TB, PB.
+## A byte count in 1024-based units with one decimal, a trailing `.0` dropped.
+##
+## Units run B, KB, MB, GB, TB, PB. A tie rounds to even (`535808` is
+## `"523.2 KB"`), and a value that rounds up to 1024 moves to the next unit
+## (`1048575` is `"1 MB"`). A negative count keeps its sign. A Float is
+## truncated first.
+##
+## errors: `bug`/`bad_argument` when `bytes` is not a finite number.
+##
+## example:
+##   humanize.size(1468006)   # "1.4 MB"
 export fn size(bytes) {
-    b = magnitude(whole(bytes, "size", "bytes"))
-    if b < 1024 { return "{b} B" }
+    raw = whole(bytes, "size", "bytes")
+    sign = if raw < 0 { "-" } else { "" }
+    b = magnitude(raw)
+    if b < 1024 { return "{sign}{b} B" }
     units = ["KB", "MB", "GB", "TB", "PB"]
     mut v = float(b) / 1024.0
     mut i = 0
@@ -67,19 +105,30 @@ export fn size(bytes) {
         v = v / 1024.0
         i = i + 1
     }
-    tenths = tenths_even(v * 10.0)
+    mut tenths = tenths_even(v * 10.0)
+    if tenths >= 10240 and i < len(units) - 1 {
+        tenths = tenths_even(v / 1024.0 * 10.0)
+        i = i + 1
+    }
     num = if tenths % 10 == 0 { string(tenths // 10) } else { "{tenths // 10}.{tenths % 10}" }
-    "{num} {units[i]}"
+    "{sign}{num} {units[i]}"
 }
 
-## Coarse relative time between two unix-millisecond timestamps: `event`, and
-## `now` - pass `time.now()`. A later `now` reads as the past
-## (`"3 days ago"`), an earlier one as the future (`"in 2 hours"`), and within
-## five seconds either way is `"just now"`. Units run seconds, minutes, hours,
-## days, months (30 days) and years (365 days).
+## Coarse relative time from `now` to `event`, both unix-millisecond timestamps.
+##
+## A later `now` reads as the past (`"3 days ago"`), an earlier one as the
+## future (`"in 2 hours"`), and within five seconds either way is
+## `"just now"`. Units run seconds, minutes, hours, days, months (30 days) and
+## years (365 days). Pass `time.now()` as `now`; taking it as an argument keeps
+## the result deterministic.
+##
+## errors: `bug`/`bad_argument` when either timestamp is not a finite number.
+##
+## example:
+##   humanize.relative(0, 259200000)   # "3 days ago"
 export fn relative(event, now) {
-    a = whole(event, "relative", "milliseconds")
-    b = whole(now, "relative", "milliseconds")
+    a = whole(event, "relative", "event")
+    b = whole(now, "relative", "now")
     # Saturating, as the native one is: timestamps at opposite ends of the
     # range would overflow the subtraction.
     delta = try {
@@ -106,19 +155,42 @@ export fn relative(event, now) {
     if delta >= 0 { "{n} {word} ago" } else { "in {n} {word}" }
 }
 
-## The English ordinal of a whole number: `ordinal(1)` is `"1st"`, `ordinal(11)`
-## is `"11th"`, `ordinal(23)` is `"23rd"`. A Float is truncated first.
+# A Float's Int value when it is whole and fits, else null.
+fn whole_float(x) {
+    try {
+        k = int(x)
+        if float(k) == x { k } else { null }
+    } catch (_) { null }
+}
+
+## The English ordinal of a whole number.
+##
+## 11, 12 and 13 take "th" despite ending in 1, 2 and 3, and a negative number
+## takes the suffix of its magnitude (`-1st`), as the `inflect` package does. A
+## Float is accepted only when it is whole (`3.0`).
+##
+## errors: `bug`/`bad_argument` when `n` is not an Int or a whole Float.
+##
+## example:
+##   humanize.ordinal(23)    # "23rd"
+##   humanize.ordinal(-11)   # "-11th"
 export fn ordinal(n) {
-    k = whole(n, "ordinal", "items")
-    r100 = k % 100
-    r10 = k % 10
-    suffix = if r100 >= 11 and r100 <= 13 {
+    k = match type_of(n) {
+        "int" => n
+        "float" => whole_float(n)
+        _ => null
+    }
+    if is_null(k) { bad_argument("ordinal", "n", "a whole number", n) }
+    digits = filter(chars(string(k)), fn(c) c != "-")
+    last_two = int(join(drop(digits, max(len(digits) - 2, 0)), "")) % 100
+    last_one = last_two % 10
+    suffix = if last_two >= 11 and last_two <= 13 {
         "th"
-    } else if r10 == 1 {
+    } else if last_one == 1 {
         "st"
-    } else if r10 == 2 {
+    } else if last_one == 2 {
         "nd"
-    } else if r10 == 3 {
+    } else if last_one == 3 {
         "rd"
     } else {
         "th"
@@ -126,15 +198,44 @@ export fn ordinal(n) {
     "{k}{suffix}"
 }
 
-## A count and a word, the word pluralised for anything but 1 or -1:
-## `plural(3, "day")` is `"3 days"`. Pluralising only adds `s`; pass the plural
-## for anything irregular: `plural(2, "person", "people")` is `"2 people"`.
+# The regular English plural: -es after s, x, z, ch and sh, -ies for a
+# consonant and y, -s otherwise.
+fn regular_plural(word) {
+    cs = chars(word)
+    n = len(cs)
+    end1 = if n > 0 { lower(cs[n - 1]) } else { "" }
+    end2 = if n > 1 { lower(cs[n - 2]) + end1 } else { end1 }
+    if contains(["s", "x", "z"], end1) or contains(["ch", "sh"], end2) { return word + "es" }
+    if end1 == "y" and n > 1 and contains(["a", "e", "i", "o", "u"], lower(cs[n - 2])) == false {
+        return join(take(cs, n - 1), "") + "ies"
+    }
+    word + "s"
+}
+
+## A count and a word, the word in the plural for anything but 1 or -1.
+##
+## The plural follows the regular English endings (`bus` to `buses`, `city` to
+## `cities`); pass it for anything irregular. A Float count is truncated
+## first. The `inflect` package knows irregular words.
+##
+## errors: `bug`/`bad_argument` when `n` is not a finite number or a word is
+## not a string.
+##
+## example:
+##   humanize.plural(3, "day")                # "3 days"
+##   humanize.plural(2, "person", "people")   # "2 people"
 export fn plural(n, singular, plural = null) {
-    k = whole(n, "plural", "items")
+    k = whole(n, "plural", "n")
+    unless type_of(singular) == "string" {
+        bad_argument("plural", "singular", "a string", singular)
+    }
+    unless is_null(plural) or type_of(plural) == "string" {
+        bad_argument("plural", "plural", "a string or null", plural)
+    }
     word = if k == 1 or k == -1 {
         singular
     } else if plural == null {
-        singular + "s"
+        regular_plural(singular)
     } else {
         plural
     }
